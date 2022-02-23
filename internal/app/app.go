@@ -2,19 +2,25 @@ package app
 
 import (
 	"context"
+	"errors"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"github.com/JIeeiroSst/core-backend/pkg/dns"
 	"github.com/JIeeiroSst/core-backend/pkg/email/smtp"
 	"github.com/cloudflare/cloudflare-go"
-	"github.com/gin-gonic/gin"
 
 	"github.com/JIeeiroSst/core-backend/pkg/storage"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 
 	"github.com/JIeeiroSst/core-backend/internal/config"
-	delivery "github.com/JIeeiroSst/core-backend/internal/delivery/http/v1"
+	delivery "github.com/JIeeiroSst/core-backend/internal/delivery/http"
 	"github.com/JIeeiroSst/core-backend/internal/repository"
+	"github.com/JIeeiroSst/core-backend/internal/server"
 	"github.com/JIeeiroSst/core-backend/internal/usecase"
 	"github.com/JIeeiroSst/core-backend/pkg/auth"
 	"github.com/JIeeiroSst/core-backend/pkg/cache"
@@ -44,7 +50,7 @@ import (
 // @name Authorization
 
 // Run initializes whole application.
-func Run(configPath string, gin *gin.Engine) {
+func Run(configPath string) {
 	cfg, err := config.Init(configPath)
 	if err != nil {
 		logger.Error(err)
@@ -121,7 +127,35 @@ func Run(configPath string, gin *gin.Engine) {
 
 	services.Files.InitStorageUploaderWorkers(context.Background())
 
-	handlers.Init(gin)
+	// HTTP Server
+	srv := server.NewServer(cfg, handlers.Init(cfg))
+
+	go func() {
+		if err := srv.Run(); !errors.Is(err, http.ErrServerClosed) {
+			logger.Errorf("error occurred while running http server: %s\n", err.Error())
+		}
+	}()
+
+	logger.Info("Server started")
+
+	// Graceful Shutdown
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGTERM, syscall.SIGINT)
+
+	<-quit
+
+	const timeout = 5 * time.Second
+
+	ctx, shutdown := context.WithTimeout(context.Background(), timeout)
+	defer shutdown()
+
+	if err := srv.Stop(ctx); err != nil {
+		logger.Errorf("failed to stop server: %v", err)
+	}
+
+	if err := mongoClient.Disconnect(context.Background()); err != nil {
+		logger.Error(err.Error())
+	}
 }
 
 func newStorageProvider(cfg *config.Config) (storage.Provider, error) {

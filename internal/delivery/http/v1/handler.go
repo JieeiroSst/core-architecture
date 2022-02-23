@@ -21,7 +21,7 @@ func NewHandler(usecase *usecase.Usecase, tokenManager auth.TokenManager) *Handl
 	}
 }
 
-func (h *Handler) Init(api *gin.Engine) {
+func (h *Handler) Init(api *gin.RouterGroup) {
 	v1 := api.Group("/v1")
 	{
 		h.initUsersRoutes(v1)
