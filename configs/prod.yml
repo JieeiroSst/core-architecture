@@ -1,0 +1,4 @@
+auth:
+  accessTokenTTL: 2h
+  refreshTokenTTL: 720h
+
